@@ -9,9 +9,9 @@ import remarkGfm from 'remark-gfm';
 interface ArticleViewerProps {
   text: string;
   glossary: Record<string, string>;
-  highlights?: string[];
+  highlights?: { text: string; index: number }[];
   onSaveTerm?: (term: string, definition: string) => void;
-  onHighlight?: (text: string) => void;
+  onHighlight?: (highlight: { text: string; index: number }) => void;
   onClearHighlights?: () => void;
   canSave?: boolean;
   revision?: number;
@@ -36,6 +36,7 @@ export function ArticleViewer({
   onToggleLexicon
 }: ArticleViewerProps) {
   const [selectionText, setSelectionText] = useState<string | null>(null);
+  const [selectionIndex, setSelectionIndex] = useState<number>(0);
   const [selectionContext, setSelectionContext] = useState<string | null>(null);
   const [aiDefinition, setAiDefinition] = useState<string | null>(null);
   const [isDefining, setIsDefining] = useState(false);
@@ -49,6 +50,16 @@ export function ArticleViewer({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const viewerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Terminate processing if selectionText changes or box is closed
+  useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsDefining(false);
+    }
+  }, [selectionText]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -62,29 +73,87 @@ export function ArticleViewer({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isSearchOpen]);
 
+  const getOccurrenceIndex = useCallback((sel: Selection, targetText: string) => {
+    const viewer = viewerRef.current;
+    if (!viewer || !sel || sel.rangeCount === 0) return 0;
+
+    try {
+      const range = sel.getRangeAt(0);
+      const startNode = range.startContainer;
+      const startOffset = range.startOffset;
+      
+      const normalizedTarget = targetText.trim().replace(/\s+/g, ' ').toLowerCase();
+      if (!normalizedTarget) return 0;
+
+      let occurrenceCount = 0;
+      const walker = document.createTreeWalker(viewer, NodeFilter.SHOW_TEXT);
+      
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        
+        // Skip UI elements like definitions or hidden text
+        const parent = node.parentElement;
+        if (parent && (
+          parent.closest('.tooltip-content') || 
+          parent.closest('.hidden') || 
+          parent.closest('.ai-assistant-panel') ||
+          parent.getAttribute('aria-hidden') === 'true'
+        )) {
+          continue;
+        }
+
+        const text = node.textContent || "";
+        const normalizedText = text.replace(/\s+/g, ' ').toLowerCase();
+
+        if (node === startNode) {
+          const partBefore = text.substring(0, startOffset);
+          const normalizedPartBefore = partBefore.replace(/\s+/g, ' ').toLowerCase();
+          
+          const escaped = normalizedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped, 'g');
+          const matchesBefore = normalizedPartBefore.match(regex);
+          if (matchesBefore) {
+            occurrenceCount += matchesBefore.length;
+          }
+          break;
+        }
+
+        const escaped = normalizedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escaped, 'g');
+        const matches = normalizedText.match(regex);
+        if (matches) {
+          occurrenceCount += matches.length;
+        }
+      }
+
+      return occurrenceCount;
+    } catch (err) {
+      console.error("Error in getOccurrenceIndex:", err);
+      return 0;
+    }
+  }, []);
+
   const handleSelection = (e: React.MouseEvent | React.KeyboardEvent) => {
     if (isProcessingContent) return;
     
-    // Don't clear selection if user is clicking inside the assistant panel
     const target = e.target as HTMLElement;
     if (target.closest('.ai-assistant-panel')) return;
 
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) {
-      const selected = sel.toString().trim();
+      const selected = sel.toString();
+      const index = getOccurrenceIndex(sel, selected);
       
       if (selectionMode === 'highlight') {
         if (onHighlight) {
-          onHighlight(selected);
+            onHighlight({ text: selected.trim().replace(/\s+/g, ' '), index });
         }
-        // Don't show popup in highlight mode
-        setSelectionText(null);
-        // Clear window selection
-        window.getSelection()?.removeAllRanges();
+        setTimeout(() => window.getSelection()?.removeAllRanges(), 200);
         return;
       }
 
-      setSelectionText(selected);
+      setSelectionText(selected.trim());
+      setSelectionIndex(index);
       
       // Attempt to find the paragraph/block context
       let context = "";
@@ -105,7 +174,7 @@ export function ArticleViewer({
         console.error("Error getting selection context", err);
       }
       
-      setSelectionContext(context || selected); // Fallback to selection itself if context fails
+      setSelectionContext(context || selected); 
       setAiDefinition(null);
     } else {
       if (!aiDefinition) {
@@ -117,17 +186,36 @@ export function ArticleViewer({
 
   const handleAiDefine = async () => {
     if (!selectionText) return;
+
+    // Abort previous if any
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
     setIsDefining(true);
     try {
-      // Use the paragraph context if available, fallback to full text
       const contextToUse = selectionContext || text;
-      const def = await defineSelection(selectionText, contextToUse);
-      setAiDefinition(def);
+      const def = await defineSelection(selectionText, contextToUse, controller.signal);
+      
+      // If we weren't aborted and selection hasn't changed/cleared
+      if (!controller.signal.aborted && selectionText) {
+        setAiDefinition(def);
+      }
     } catch (e: any) {
+      if (e.name === 'AbortError') {
+        console.log("AI Definition aborted");
+        return;
+      }
       const { formatGeminiError } = await import('../lib/gemini');
       setAiDefinition(formatGeminiError(e));
     } finally {
-      setIsDefining(false);
+      if (abortControllerRef.current === controller) {
+        setIsDefining(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -199,7 +287,7 @@ export function ArticleViewer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchOpen, onToggleLexicon, onClearHighlights, showShortcuts, selectionText]); 
+  }, [isSearchOpen, onToggleLexicon, onClearHighlights, showShortcuts, selectionText, selectionMode]); 
 
   // Zoom shortcut listener for Ctrl+Wheel
   useEffect(() => {
@@ -284,64 +372,77 @@ export function ArticleViewer({
     scrollToMatch(prev);
   };
 
-  const highlightText = useCallback((content: string) => {
+  const highlightText = useCallback((content: string, counters: Record<string, number>) => {
     if (!content || typeof content !== 'string') return content;
     
-    // Sort terms and highlights by length (descending) to ensure longest phrases match first
     const termsArr = Object.keys(glossary).sort((a, b) => b.length - a.length);
-    const sortedHighlights = [...highlights].sort((a, b) => b.length - a.length);
-    
-    if (termsArr.length === 0 && sortedHighlights.length === 0) return content;
-
-    // Create combinations for regex
-    const escapedTerms = termsArr.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const escapedHighlights = sortedHighlights.map(h => h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const validHighlights = (highlights || []).filter(h => h && typeof h === 'object' && typeof h.text === 'string');
+    const sortedHighlights = [...validHighlights].sort((a, b) => b.text.length - a.text.length);
     
     // Search tokens
     const searchTokens = searchQuery.trim() ? [searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')] : [];
     
     // Combine all to a single regex for one-pass processing
-    const allTokens = [...new Set([...escapedTerms, ...escapedHighlights, ...searchTokens])].sort((a, b) => b.length - a.length);
+    const allTokens = [...new Set([
+      ...termsArr.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      ...sortedHighlights.map(h => h.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      ...searchTokens
+    ])].sort((a, b) => b.length - a.length);
+
     if (allTokens.length === 0) return content;
 
     const regex = new RegExp(`(${allTokens.join('|')})`, 'gi');
-
     const parts = content.split(regex);
     const result: React.ReactNode[] = [];
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
-      if (!part) continue;
+      if (part === undefined) continue;
 
       if (i % 2 === 1) {
         // This is a matched token
         const lowerPart = part.toLowerCase();
+        const normalizedPart = part.trim().replace(/\s+/g, ' ').toLowerCase();
         
+        // Update occurrence counter for this specific string
+        counters[normalizedPart] = (counters[normalizedPart] || 0) + 1;
+        const currentOccurrenceIndex = counters[normalizedPart] - 1;
+
         // Find which type it is
         const originalTermKey = termsArr.find(t => t.toLowerCase() === lowerPart);
-        const isHighlight = sortedHighlights.some(h => h.toLowerCase() === lowerPart);
+        const highlightMatch = sortedHighlights.find(h => {
+          const hText = h.text.trim().replace(/\s+/g, ' ').toLowerCase();
+          return hText === normalizedPart && h.index === currentOccurrenceIndex;
+        });
         const isSearchMatch = searchQuery.trim() && lowerPart === searchQuery.trim().toLowerCase();
 
         if (originalTermKey) {
           const definition = glossary[originalTermKey] || "";
           result.push(
-            <Tooltip key={`term-${i}`} term={originalTermKey} definition={definition} isHighlighted={isHighlight}>
+            <Tooltip key={`term-${i}-${currentOccurrenceIndex}`} term={originalTermKey} definition={definition} isHighlighted={!!highlightMatch}>
               {part}
             </Tooltip>
           );
         } else if (isSearchMatch) {
           result.push(
             <mark 
-              key={`search-${i}`} 
+              key={`search-${i}-${currentOccurrenceIndex}`} 
               data-search-match="true"
               className="bg-green-300 text-green-900 px-0.5 rounded-sm font-medium ring-2 ring-green-500"
             >
               {part}
             </mark>
           );
-        } else if (isHighlight) {
+        } else if (highlightMatch) {
           result.push(
-            <mark key={`mark-${i}`} className="bg-yellow-200 text-yellow-900 px-0.5 rounded-sm font-medium">
+            <mark 
+              key={`mark-${i}-${currentOccurrenceIndex}`} 
+              onClick={(e) => {
+                e.stopPropagation();
+                onHighlight?.({ text: part, index: currentOccurrenceIndex });
+              }}
+              className="bg-yellow-300 text-yellow-950 px-0.5 rounded-sm font-bold shadow-[0_0_10px_rgba(253,224,71,0.5)] ring-1 ring-yellow-500 cursor-pointer hover:bg-yellow-400 transition-colors"
+            >
               {part}
             </mark>
           );
@@ -349,25 +450,22 @@ export function ArticleViewer({
           result.push(part);
         }
       } else {
-        result.push(part);
+        if (part) result.push(part);
       }
     }
     return result;
   }, [glossary, highlights, searchQuery]);
 
-  const processChildren = useCallback((children: React.ReactNode): React.ReactNode => {
+  const processChildren = useCallback((children: React.ReactNode, counters: Record<string, number>): React.ReactNode => {
     return React.Children.map(children, child => {
       if (typeof child === 'string') {
-        return highlightText(child);
+        return highlightText(child, counters);
       }
       if (React.isValidElement(child)) {
         const elementChild = child as React.ReactElement<any>;
         if (elementChild.props && elementChild.props.children) {
-          // Skip highlighting inside links to avoid nested interactive elements
-          if (elementChild.type === 'a') return child;
-          
           return React.cloneElement(elementChild, {
-            children: processChildren(elementChild.props.children)
+            children: processChildren(elementChild.props.children, counters)
           });
         }
       }
@@ -375,34 +473,105 @@ export function ArticleViewer({
     });
   }, [highlightText]);
 
-  const components = useMemo(() => ({
-    p: ({ children }: any) => <p className="mb-4">{processChildren(children)}</p>,
-    h1: ({ children }: any) => <h1 className="text-2xl font-bold mb-4">{processChildren(children)}</h1>,
-    h2: ({ children }: any) => <h2 className="text-xl font-bold mb-3">{processChildren(children)}</h2>,
-    h3: ({ children }: any) => <h3 className="text-lg font-bold mb-2">{processChildren(children)}</h3>,
-    li: ({ children }: any) => <li className="mb-1">{processChildren(children)}</li>,
-    em: ({ children }: any) => <em className="italic">{processChildren(children)}</em>,
-    strong: ({ children }: any) => <strong className="font-bold">{processChildren(children)}</strong>,
-    td: ({ children }: any) => <td className="p-2 border">{processChildren(children)}</td>,
-    th: ({ children }: any) => <th className="p-2 border font-bold bg-gray-50">{processChildren(children)}</th>,
-    a: ({ children, href }: any) => <a href={href} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">{processChildren(children)}</a>,
-    blockquote: ({ children }: any) => <blockquote className="border-l-4 border-gray-200 pl-4 italic my-4">{processChildren(children)}</blockquote>,
-    table: ({ children }: any) => (
-      <div className="overflow-x-auto my-4">
-        <table className="min-w-full border-collapse border">{processChildren(children)}</table>
-      </div>
-    ),
-  }), [processChildren]);
+  const countersRef = useRef<Record<string, number>>({});
+
+  // Reset counters for each fresh render pass
+  countersRef.current = {};
+
+  const components = useMemo(() => {
+    const wrap = (children: any) => processChildren(children, countersRef.current);
+
+    return {
+      p: ({ children }: any) => <p className="mb-6 leading-relaxed text-gray-800 text-lg sm:text-xl font-sans selection:bg-indigo-100">{wrap(children)}</p>,
+      h1: ({ children }: any) => <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mt-12 mb-8 border-b-2 border-indigo-100 pb-2">{wrap(children)}</h1>,
+      h2: ({ children }: any) => <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mt-10 mb-6">{wrap(children)}</h2>,
+      h3: ({ children }: any) => <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mt-8 mb-4">{wrap(children)}</h3>,
+      li: ({ children }: any) => <li className="mb-3 text-gray-700 leading-relaxed text-lg">{wrap(children)}</li>,
+      em: ({ children }: any) => <em className="italic text-gray-800">{wrap(children)}</em>,
+      strong: ({ children }: any) => <strong className="font-bold text-gray-900">{wrap(children)}</strong>,
+      td: ({ children }: any) => <td className="p-3 border border-gray-200 text-gray-800">{wrap(children)}</td>,
+      th: ({ children }: any) => <th className="p-3 border border-gray-200 font-bold bg-gray-50 text-gray-900">{wrap(children)}</th>,
+      a: ({ children, href }: any) => <a href={href} className="text-indigo-600 underline font-medium hover:text-indigo-800" target="_blank" rel="noopener noreferrer">{wrap(children)}</a>,
+      blockquote: ({ children }: any) => (
+        <blockquote className="border-l-4 border-indigo-200 pl-6 my-8 italic text-gray-600 text-xl font-serif">
+          {wrap(children)}
+        </blockquote>
+      ),
+      table: ({ children }: any) => (
+        <div className="overflow-x-auto my-4">
+          <table className="min-w-full border-collapse border">{wrap(children)}</table>
+        </div>
+      ),
+    }
+  }, [processChildren]);
 
   return (
     <div 
-      ref={viewerRef}
       onMouseUp={handleSelection}
       onKeyUp={handleSelection}
       className="flex items-start gap-8 w-full"
     >
-      <div className="flex-1 flex justify-center min-w-0">
+      {/* Floating Top Search Bar */}
+      <AnimatePresence>
+        {isSearchOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            className="fixed top-8 left-1/2 z-[100] flex items-center gap-3 bg-white/95 backdrop-blur-md border border-gray-200 rounded-2xl pl-5 pr-3 py-2 shadow-2xl min-w-[400px] border-b-4 border-b-blue-500"
+            ref={searchRef}
+          >
+            <Search className="size-4 text-blue-500" />
+            <input 
+              autoFocus
+              type="text" 
+              placeholder="Find in document..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="bg-transparent border-none outline-none text-sm flex-1 font-medium text-gray-900"
+            />
+            <div className="flex items-center gap-1 border-l border-gray-100 pl-3">
+              <span className="text-[10px] font-bold text-gray-400 font-mono min-w-[45px] text-center bg-gray-50 py-1 rounded">
+                {searchMatches.length > 0 ? `${currentMatchIndex + 1}/${searchMatches.length}` : '0/0'}
+              </span>
+              <button 
+                onClick={prevMatch} 
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
+                title="Previous Match"
+              >
+                <ChevronUp className="size-4" />
+              </button>
+              <button 
+                onClick={nextMatch} 
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
+                title="Next Match"
+              >
+                <ChevronDown className="size-4" />
+              </button>
+              <div className="w-px h-4 bg-gray-200 mx-1" />
+              <button 
+                onClick={() => {
+                  setIsSearchOpen(false);
+                  handleSearch("");
+                }} 
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-red-500 transition-colors"
+                title="Close Search"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="flex-1 flex flex-col items-center justify-start min-w-0">
+        {isProcessingTerms && !isProcessingContent && text && (
+          <div className="w-full max-w-4xl mb-4 p-4 bg-blue-50/80 backdrop-blur-sm border border-blue-100 rounded-xl flex items-center gap-3 shadow-sm select-none">
+            <Loader2 className="size-4 text-blue-500 animate-spin" />
+            <span className="text-sm font-medium text-blue-700">Analyzing terminology and generating glossary... Highlights will appear automatically.</span>
+          </div>
+        )}
         <div 
+          ref={viewerRef}
           id="article-viewer"
           style={{ zoom: `${zoom}%` }}
           className={`prose prose-blue prose-sm md:prose-base w-full max-w-4xl rounded-2xl bg-white p-8 md:p-12 shadow-sm border border-gray-100 min-h-[600px] leading-relaxed text-gray-800 transition-all ${
@@ -421,14 +590,8 @@ export function ArticleViewer({
             <p className="text-gray-400 italic text-center py-20">Select a document from the sidebar or paste text to begin...</p>
           ) : (
             <>
-              {isProcessingTerms && (
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3">
-                  <Loader2 className="size-4 text-blue-500 animate-spin" />
-                  <span className="text-sm font-medium text-blue-700">Analyzing terminology and generating glossary... Highlights will appear automatically.</span>
-                </div>
-              )}
               <ReactMarkdown 
-                key={`viewer-${revision}-${Object.keys(glossary).length}`}
+                key={`viewer-${revision}-${Object.keys(glossary).length}-${highlights.length}`}
                 remarkPlugins={[remarkGfm]}
                 components={components}
               >
@@ -471,7 +634,7 @@ export function ArticleViewer({
                   </button>
                   <button 
                     onClick={() => setSelectionMode('highlight')}
-                    className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'highlight' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'highlight' ? 'bg-yellow-400 text-yellow-950 shadow-lg' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     title="Quick Highlight Mode (Shift+H)"
                   >
                     <Highlighter className="size-5" />
@@ -480,34 +643,7 @@ export function ArticleViewer({
 
                 {/* 2. Search & Lexicon */}
                 <div className="flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-1.5 shadow-xl">
-                  <div className="relative flex justify-center" ref={searchRef}>
-                    <AnimatePresence>
-                      {isSearchOpen && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.9, x: -20 }}
-                          animate={{ opacity: 1, scale: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.9, x: -20 }}
-                          className="absolute right-full mr-4 bottom-0 flex items-center gap-2 bg-white border border-gray-200 rounded-xl pl-4 pr-2 py-1 shadow-2xl h-11 w-64"
-                        >
-                          <input 
-                            autoFocus
-                            type="text" 
-                            placeholder="Find..."
-                            value={searchQuery}
-                            onChange={(e) => handleSearch(e.target.value)}
-                            className="bg-transparent border-none outline-none text-sm flex-1"
-                          />
-                          <div className="flex items-center gap-1 border-l border-gray-100 pl-2">
-                            <span className="text-[10px] text-gray-400 font-mono w-8 text-center">
-                              {searchMatches.length > 0 ? `${currentMatchIndex + 1}/${searchMatches.length}` : '0/0'}
-                            </span>
-                            <button onClick={prevMatch} className="p-1.5 hover:bg-gray-100 rounded text-gray-400"><ChevronUp className="size-4" /></button>
-                            <button onClick={nextMatch} className="p-1.5 hover:bg-gray-100 rounded text-gray-400"><ChevronDown className="size-4" /></button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                    
+                  <div className="relative flex justify-center">
                     <button 
                       onClick={() => setIsSearchOpen(!isSearchOpen)}
                       className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${isSearchOpen ? 'bg-indigo-50 text-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
@@ -554,6 +690,15 @@ export function ArticleViewer({
 
                 {/* 4. Misc & Utilities */}
                 <div className="flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-1.5 shadow-xl">
+                  {onClearHighlights && highlights.length > 0 && (
+                    <button 
+                      onClick={onClearHighlights}
+                      className="p-2.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center"
+                      title="Clear All Highlights (Shift+C)"
+                    >
+                      <Trash2 className="size-5" />
+                    </button>
+                  )}
                   <button 
                     onClick={() => setShowShortcuts(!showShortcuts)}
                     className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${showShortcuts ? 'bg-gray-900 text-white' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
@@ -561,16 +706,6 @@ export function ArticleViewer({
                   >
                     <Keyboard className="size-5" />
                   </button>
-                  
-                  {highlights.length > 0 && onClearHighlights && (
-                    <button 
-                      onClick={onClearHighlights}
-                      className="p-2.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center"
-                      title="Clear Highlights (Shift+C)"
-                    >
-                      <Trash2 className="size-5" />
-                    </button>
-                  )}
                 </div>
               </motion.div>
             )}
@@ -613,8 +748,6 @@ export function ArticleViewer({
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Navigation & Tools</div>
                   <div className="grid gap-2">
                     <ShortcutRow keys={['Ctrl', 'F']} label="Find in text" />
-                    <ShortcutRow keys={['Shift', 'D']} label="AI Define Mode" />
-                    <ShortcutRow keys={['Shift', 'H']} label="Highlight Mode" />
                     <ShortcutRow keys={['Shift', 'L']} label="Toggle Lexicon" />
                     <ShortcutRow keys={['Shift', 'C']} label="Clear All Highlights" />
                     <ShortcutRow keys={['Shift', 'S']} label="Shortcuts Inventory" />
@@ -694,14 +827,33 @@ export function ArticleViewer({
                       className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-md active:scale-95"
                     >
                       <Save className="size-3" />
-                      SAVE TO SHEET
+                      SAVE TERM
                     </button>
                   )}
                   <button 
-                    onClick={() => setAiDefinition(null)}
-                    className="flex-1 py-2.5 px-3 bg-gray-100 text-gray-600 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all active:scale-95 uppercase"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      if (onHighlight && selectionText) {
+                        onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex });
+                      }
+                      setSelectionText(null);
+                      setAiDefinition(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-yellow-400 text-yellow-950 border border-yellow-500 rounded-xl text-xs font-bold hover:bg-yellow-500 shadow-md transition-all active:scale-95 uppercase"
                   >
-                    Discard
+                    <Highlighter className="size-3" />
+                    Highlight
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSelectionText(null);
+                      setAiDefinition(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="py-2.5 px-3 bg-gray-100 text-gray-500 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all active:scale-95 uppercase"
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -723,6 +875,21 @@ export function ArticleViewer({
                       <span>DEFINE WITH AI</span>
                     </>
                   )}
+                </button>
+                <button 
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (onHighlight && selectionText) {
+                      onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex });
+                    }
+                    setSelectionText(null);
+                    setAiDefinition(null);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-yellow-400 text-yellow-950 border border-yellow-500 rounded-xl text-sm font-bold hover:bg-yellow-500 shadow-lg transition-all active:scale-[0.98]"
+                >
+                  <Highlighter className="size-4" />
+                  <span>APPLY HIGHLIGHT</span>
                 </button>
               </div>
             )}

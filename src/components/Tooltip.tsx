@@ -27,7 +27,7 @@ export function Tooltip({ term, definition, children, isHighlighted }: TooltipPr
     <span 
       className={`relative cursor-help border-b-2 border-indigo-500 transition-colors inline font-semibold ${
         isHighlighted 
-          ? "bg-yellow-200 text-yellow-900 border-yellow-500 rounded-sm" 
+          ? "bg-yellow-300 text-yellow-950 border-yellow-500 rounded-sm font-bold shadow-[0_0_8px_rgba(253,224,71,0.4)]" 
           : "bg-indigo-100/50 text-indigo-700 px-0.5 rounded-sm hover:bg-indigo-200"
       }`}
       onMouseEnter={show}
@@ -41,7 +41,7 @@ export function Tooltip({ term, definition, children, isHighlighted }: TooltipPr
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5, scale: 0.95 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute bottom-full left-1/2 z-[9999] mb-3 w-72 -translate-x-1/2 rounded-xl bg-gray-900 p-4 text-sm text-white shadow-[0_10px_40px_rgba(0,0,0,0.3)] block border border-gray-700"
+            className="absolute bottom-full left-1/2 z-[9999] mb-3 w-72 -translate-x-1/2 rounded-xl bg-gray-900 p-4 text-sm text-white shadow-[0_10px_40px_rgba(0,0,0,0.3)] block border border-gray-700 select-none tooltip-content"
             style={{ pointerEvents: 'auto' }}
             onMouseEnter={show}
             onMouseLeave={hide}

@@ -76,9 +76,8 @@ function getFallbackMimeType(file: File): string {
   }
 }
 
-export async function defineSelection(selection: string, context: string): Promise<string> {
-  // PRIORITY TASK: Fast response for user-initiated definition
-  const response = await ai.models.generateContent({
+export async function defineSelection(selection: string, context: string, signal?: AbortSignal): Promise<string> {
+  const result = await ai.models.generateContentStream({
     model: "gemini-3-flash-preview",
     contents: `PRIORITY TASK: Define this term based on the provided context. 
     Use the context to understand the specific nuance or technical meaning of the term in this document.
@@ -92,9 +91,27 @@ export async function defineSelection(selection: string, context: string): Promi
     Line 3: [Ultra-concise English definition, max 25 words, explaining the specific usage in this context]
     
     Return ONLY these lines. Be highly accurate. Remove any "Full Form:" prefixes.`,
+    config: {
+      abortSignal: signal
+    }
   });
 
-  return response.text?.trim() || "Could not generate definition.";
+  let fullText = "";
+  try {
+    for await (const chunk of result) {
+      if (signal?.aborted) {
+        const error = new Error("AbortError");
+        error.name = "AbortError";
+        throw error;
+      }
+      fullText += chunk.text;
+    }
+  } catch (e: any) {
+    if (e.name === "AbortError") throw e;
+    throw e;
+  }
+
+  return fullText.trim() || "Could not generate definition.";
 }
 
 export async function extractFullContent(file: File): Promise<{ content: string; terms: Record<string, string> }> {

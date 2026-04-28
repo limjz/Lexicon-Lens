@@ -124,39 +124,6 @@ export default function App() {
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
-  const handleHighlightText = (text: string) => {
-    if (!text) return;
-    const targetId = selectedSheetId;
-    if (!targetId) return;
-
-    const normalized = text.trim().replace(/\s+/g, ' ');
-
-    setCheatSheets(prev => prev.map(sheet => {
-      if (sheet.id === targetId) {
-        const currentHighlights = sheet.highlights || [];
-        const exists = currentHighlights.some(h => h.toLowerCase() === normalized.toLowerCase());
-        
-        if (exists) {
-          return { ...sheet, highlights: currentHighlights.filter(h => h.toLowerCase() !== normalized.toLowerCase()) };
-        } else {
-          return { ...sheet, highlights: [...currentHighlights, normalized] };
-        }
-      }
-      return sheet;
-    }));
-    setGlossaryRevision(prev => prev + 1);
-  };
-
-  const handleClearHighlights = () => {
-    const targetId = selectedSheetId;
-    if (!targetId) return;
-    setCheatSheets(prev => prev.map(sheet => {
-      if (sheet.id === targetId) return { ...sheet, highlights: [] };
-      return sheet;
-    }));
-    setGlossaryRevision(prev => prev + 1);
-  };
-
   const [lexiconWidth, setLexiconWidth] = useState(320);
   const [libraryWidth, setLibraryWidth] = useState(320);
   const [lexiconSearchQuery, setLexiconSearchQuery] = useState("");
@@ -298,6 +265,45 @@ export default function App() {
     if (!selectedSheetId) return [];
     return selectedSheet?.highlights || [];
   }, [selectedSheet, selectedSheetId]);
+
+  const handleHighlightText = (highlight: { text: string; index: number }) => {
+    if (!highlight.text) return;
+    const targetId = selectedSheetId;
+    if (!targetId) return;
+
+    const normalizedText = highlight.text.trim().replace(/\s+/g, ' ');
+
+    setCheatSheets(prev => prev.map(sheet => {
+      if (sheet.id === targetId) {
+        const currentHighlights = (sheet.highlights || []).filter(h => 
+          h && typeof h === 'object' && typeof h.text === 'string'
+        ) as { text: string; index: number }[];
+        
+        const existingIndex = currentHighlights.findIndex(h => 
+          h.text.toLowerCase() === normalizedText.toLowerCase() && 
+          h.index === highlight.index
+        );
+        
+        const newHighlights = existingIndex !== -1
+          ? currentHighlights.filter((_, i) => i !== existingIndex)
+          : [...currentHighlights, { text: normalizedText, index: highlight.index }];
+
+        return { ...sheet, highlights: newHighlights };
+      }
+      return sheet;
+    }));
+    setGlossaryRevision(prev => prev + 1);
+  };
+
+  const handleClearHighlights = () => {
+    const targetId = selectedSheetId;
+    if (!targetId) return;
+    setCheatSheets(prev => prev.map(sheet => {
+      if (sheet.id === targetId) return { ...sheet, highlights: [] };
+      return sheet;
+    }));
+    setGlossaryRevision(prev => prev + 1);
+  };
 
   return (
     <div id="app-container" className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
