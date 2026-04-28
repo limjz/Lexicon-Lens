@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { FileUp, FileText, X, Loader2, Trash2, CheckCircle2, FolderPlus, MoreVertical, Edit2, ChevronRight, ChevronDown, Folder, Zap, RotateCcw } from 'lucide-react';
-import { processFile } from '../lib/gemini';
+import { FileUp, FileText, X, Loader2, Trash2, CheckCircle2, FolderPlus, MoreVertical, Edit2, ChevronRight, ChevronDown, Folder, Zap, RotateCcw, Plus, Globe } from 'lucide-react';
+import { processFile, processUrl, formatGeminiError } from '../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
 
 export interface Category {
@@ -13,6 +13,7 @@ export interface CheatSheet {
   name: string;
   content: string;
   terms: Record<string, string>;
+  highlights?: string[];
   folderId?: string;
   isProcessing?: boolean;
   isProcessingContent?: boolean;
@@ -52,7 +53,15 @@ export function Sidebar({
   const [editValue, setEditValue] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('lexicon_expanded_folders');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
+
+  useEffect(() => {
+    localStorage.setItem('lexicon_expanded_folders', JSON.stringify(Array.from(expandedFolders)));
+  }, [expandedFolders]);
+
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -60,6 +69,29 @@ export function Sidebar({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, ids: string[] } | null>(null);
+
+  const [urlInput, setUrlInput] = useState("");
+  const [isImportingUrl, setIsImportingUrl] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [activeImportTab, setActiveImportTab] = useState<'file' | 'url'>('file');
+
+  const importModalRef = useRef<HTMLDivElement>(null);
+  const folderFormRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (importModalRef.current && !importModalRef.current.contains(event.target as Node)) {
+        setIsImportModalOpen(false);
+      }
+      if (folderFormRef.current && !folderFormRef.current.contains(event.target as Node)) {
+        setIsCreatingFolder(false);
+      }
+    };
+    if (isImportModalOpen || isCreatingFolder) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isImportModalOpen, isCreatingFolder]);
 
   const toggleFolder = (id: string) => {
     setExpandedFolders(prev => {
@@ -81,6 +113,47 @@ export function Sidebar({
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
     setError("Upload sequence stopped.");
+  };
+
+  const handleUrlImport = async () => {
+    if (!urlInput.trim()) return;
+    
+    setIsImportingUrl(true);
+    setError(null);
+    const sheetId = Math.random().toString(36).substr(2, 9);
+
+    try {
+      // 1. Initial UI feedback
+      onAddCheatSheet({
+        id: sheetId,
+        name: "Importing from URL...",
+        content: "",
+        terms: {},
+        isProcessing: true,
+        isProcessingContent: true,
+        isProcessingTerms: false
+      });
+
+      // 2. Process
+      const result = await processUrl(urlInput);
+      
+      onUpdateCheatSheet(sheetId, {
+        name: result.name,
+        content: result.content,
+        isProcessing: false,
+        isProcessingContent: false
+      });
+
+      setUrlInput("");
+      setIsImportModalOpen(false);
+    } catch (err: any) {
+      console.error("URL Import failed:", err);
+      const errorMsg = formatGeminiError(err);
+      setError(`URL Import Failed: ${errorMsg}`);
+      onRemoveCheatSheet(sheetId);
+    } finally {
+      setIsImportingUrl(false);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,6 +261,7 @@ export function Sidebar({
     })();
 
     if (fileInputRef.current) fileInputRef.current.value = '';
+    setIsImportModalOpen(false);
   };
 
   const startEditing = (sheet: CheatSheet) => {
@@ -455,11 +529,11 @@ export function Sidebar({
               />
             ) : (
               <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm font-medium truncate">{sheet.name}</span>
+                <span className="text-base font-medium truncate">{sheet.name}</span>
                 {sheet.isProcessingTerms && !sheet.isProcessingContent && (
-                  <span className="text-[10px] text-blue-500 font-bold flex items-center gap-1">
+                  <span className="text-xs text-blue-500 font-bold flex items-center gap-1">
                     <Zap className="size-2 fill-current" />
-                    Scanning terms...
+                    Scanning...
                   </span>
                 )}
               </div>
@@ -499,7 +573,7 @@ export function Sidebar({
       onMouseDown={handleMouseDown}
       onClick={handleSidebarClick}
       onContextMenu={(e) => e.preventDefault()} // Global right-click suppression for marquee
-      className="w-80 flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 h-screen overflow-hidden relative select-none"
+      className="w-full flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 h-screen overflow-hidden relative select-none"
     >
       {/* Selection Marquee Box */}
       {selectionBox && (
@@ -583,10 +657,10 @@ export function Sidebar({
         )}
       </AnimatePresence>
 
-      <div className="p-6 border-b border-gray-200">
+      <div className="p-4 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <FileText className="text-blue-600" />
+            <FileText className="text-blue-600 size-6" />
             Lexicon Lens
           </h1>
           <button 
@@ -597,10 +671,9 @@ export function Sidebar({
             <RotateCcw className="size-4 group-active:rotate-[-45deg] transition-transform" />
           </button>
         </div>
-        <p className="text-sm text-gray-500 mt-1">AI-powered reading assistant</p>
       </div>
 
-      <div className="p-6 flex-1 overflow-y-auto space-y-6">
+      <div className="p-4 flex-1 overflow-y-auto space-y-5">
         <AnimatePresence>
           {error && (
             <motion.div
@@ -620,50 +693,126 @@ export function Sidebar({
           )}
         </AnimatePresence>
 
-        <section 
-          className={`space-y-3 p-3 rounded-2xl border-2 border-dashed transition-all ${
-            isDraggingFile ? 'bg-blue-50 border-blue-400' : 'border-transparent'
-          }`}
-          onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
-          onDragLeave={() => setIsDraggingFile(false)}
-          onDrop={handleFileDrop}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Library</h2>
-            {isUploading && (
-              <button 
-                onClick={handleCancelUpload}
-                className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded hover:bg-red-200 uppercase transition-colors"
-              >
-                Stop Upload
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
+        <section className="space-y-3">
+          <div className="relative">
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl border border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 transition-all text-gray-600 hover:text-blue-600 disabled:opacity-50 group shadow-sm overflow-hidden relative"
+              onClick={() => setIsImportModalOpen(true)}
+              disabled={isUploading || isImportingUrl}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-md active:translate-y-0.5 disabled:opacity-50"
             >
-              {isUploading ? (
-                <div className="flex flex-col items-center">
-                  <Loader2 className="animate-spin size-4 text-blue-600" />
-                  <span className="text-[10px] font-bold mt-1">WORKING...</span>
-                </div>
+              {isUploading || isImportingUrl ? (
+                <Loader2 className="animate-spin size-5" />
               ) : (
-                <>
-                  <FileUp className="size-4 group-hover:-translate-y-0.5 transition-transform" />
-                  <span className="text-[10px] font-bold">UPLOAD</span>
-                </>
+                <Plus className="size-5" />
               )}
+              <span className="font-bold text-sm">ADD CONTENT</span>
             </button>
-            <button
-              onClick={() => setIsCreatingFolder(true)}
-              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-xl border border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 transition-all text-gray-600 hover:text-blue-600 shadow-sm"
-            >
-              <FolderPlus className="size-4" />
-              <span className="text-[10px] font-bold uppercase">Folder</span>
-            </button>
+
+            <AnimatePresence>
+              {isImportModalOpen && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+                >
+                  <motion.div
+                    ref={importModalRef}
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                    className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100"
+                  >
+                    {/* Tabs */}
+                    <div className="flex border-b border-gray-100">
+                      <button 
+                        onClick={() => setActiveImportTab('file')}
+                        className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider transition-colors relative ${activeImportTab === 'file' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        Upload File
+                        {activeImportTab === 'file' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600" />}
+                      </button>
+                      <button 
+                        onClick={() => setActiveImportTab('url')}
+                        className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider transition-colors relative ${activeImportTab === 'url' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        Import Link
+                        {activeImportTab === 'url' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600" />}
+                      </button>
+                    </div>
+
+                    <div className="p-6">
+                      {activeImportTab === 'file' ? (
+                        <div className="space-y-4">
+                          <div 
+                            onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
+                            onDragLeave={() => setIsDraggingFile(false)}
+                            onDrop={(e) => { handleFileDrop(e); setIsImportModalOpen(false); }}
+                            onClick={() => fileInputRef.current?.click()}
+                            className={`h-48 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 transition-all cursor-pointer ${
+                              isDraggingFile ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="size-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                              <FileUp className="size-6" />
+                            </div>
+                            <div className="text-center">
+                              <div className="text-sm font-bold text-gray-900">Drag & drop files here</div>
+                              <div className="text-xs text-gray-400 mt-1">PDF, TXT, MD, or DOCX</div>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-black transition-colors"
+                          >
+                            Browse Files
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-start gap-3">
+                            <Globe className="size-5 text-indigo-600 shrink-0 mt-0.5" />
+                            <div className="text-xs text-indigo-800 leading-relaxed">
+                              Paste any article or documentation URL. We'll automatically extract and clean the content for you.
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-1">Website URL</label>
+                            <input 
+                              autoFocus
+                              value={urlInput}
+                              onChange={(e) => setUrlInput(e.target.value)}
+                              placeholder="https://wikipedia.org/wiki/..."
+                              className="w-full text-base p-4 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all font-sans"
+                              onKeyDown={(e) => e.key === 'Enter' && handleUrlImport()}
+                            />
+                          </div>
+                          <button 
+                            onClick={handleUrlImport}
+                            disabled={isImportingUrl || !urlInput.trim()}
+                            className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-base hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg shadow-blue-200"
+                          >
+                            {isImportingUrl ? <Loader2 className="size-5 animate-spin" /> : <Globe className="size-5" />}
+                            {isImportingUrl ? "Extracting..." : "Import Web Material"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
+
+          <button
+            onClick={() => {
+              setIsCreatingFolder(true);
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-2 rounded-xl border border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 transition-all text-gray-600 hover:text-blue-600 shadow-sm"
+          >
+            <FolderPlus className="size-4" />
+            <span className="text-sm font-bold uppercase tracking-tight">New Folder</span>
+          </button>
           <input
             type="file"
             ref={fileInputRef}
@@ -676,6 +825,7 @@ export function Sidebar({
           <AnimatePresence>
             {isCreatingFolder && (
               <motion.div
+                ref={folderFormRef}
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -690,8 +840,8 @@ export function Sidebar({
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
                 />
                 <div className="flex gap-2">
-                  <button onClick={handleCreateFolder} className="flex-1 text-[10px] bg-blue-600 text-white font-bold py-1.5 rounded uppercase">Create</button>
-                  <button onClick={() => setIsCreatingFolder(false)} className="flex-1 text-[10px] bg-gray-100 text-gray-600 font-bold py-1.5 rounded uppercase">Cancel</button>
+                  <button onClick={handleCreateFolder} className="flex-1 text-xs bg-blue-600 text-white font-bold py-1.5 rounded uppercase">Create</button>
+                  <button onClick={() => setIsCreatingFolder(false)} className="flex-1 text-xs bg-gray-100 text-gray-600 font-bold py-1.5 rounded uppercase">Cancel</button>
                 </div>
               </motion.div>
             )}
@@ -699,25 +849,16 @@ export function Sidebar({
         </section>
 
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Storage</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold bg-gray-200 px-1.5 py-0.5 rounded text-gray-600 uppercase">
-                {cheatSheets.length} items
-              </span>
-            </div>
-          </div>
-
           <div className="space-y-4">
             <button
               onClick={() => { onSelectSheet(null); onPasteText(""); }}
               className={`w-full text-left p-3 rounded-xl border transition-all text-sm font-bold flex items-center gap-2 ${
                 selectedSheetId === null 
                 ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
-                : 'bg-white border-gray-100 hover:bg-gray-100 text-gray-700'
+                : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-700'
               }`}
             >
-              <Zap className={`size-4 ${selectedSheetId === null ? 'fill-white' : ''}`} />
+              <Zap className={`size-3.5 ${selectedSheetId === null ? 'fill-white' : ''}`} />
               NEW SCAN
             </button>
 
@@ -746,7 +887,7 @@ export function Sidebar({
                     <div className="space-y-1 ml-2 border-l border-gray-200">
                       {cheatSheets.filter(s => s.folderId === folder.id).map(sheet => renderSheet(sheet))}
                       {cheatSheets.filter(s => s.folderId === folder.id).length === 0 && (
-                        <div className="text-[10px] text-gray-400 italic py-2 pl-4">No documents here</div>
+                        <div className="text-xs text-gray-400 italic py-2 pl-4">No documents here</div>
                       )}
                     </div>
                   )}
@@ -754,7 +895,7 @@ export function Sidebar({
               ))}
 
               <div 
-                className={`pt-2 italic text-xs text-gray-400 pb-1 transition-colors rounded ${
+                className={`pt-2 italic text-sm text-gray-400 pb-1 transition-colors rounded ${
                   draggedOverFolderId === 'uncategorized' ? 'bg-gray-100 ring-1 ring-gray-300' : ''
                 }`}
                 data-folder-id="uncategorized"
@@ -774,12 +915,12 @@ export function Sidebar({
         </section>
       </div>
 
-      <div className="p-6 bg-white border-t border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="size-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-inner">LL</div>
-          <div>
-            <div className="text-sm font-semibold text-gray-900 leading-tight">Lexicon Linker</div>
-            <div className="text-[10px] text-green-500 font-bold uppercase tracking-tighter">System Synchronized</div>
+      <div className="p-4 bg-white border-t border-gray-100">
+        <div className="flex items-center gap-2.5">
+          <div className="size-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">LL</div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-gray-900 truncate">Lexicon Linker</div>
+            <div className="text-xs text-green-500 font-bold uppercase tracking-tight">Synced</div>
           </div>
         </div>
       </div>

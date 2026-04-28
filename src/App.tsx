@@ -2,15 +2,52 @@ import { useState, useMemo, useEffect } from 'react';
 import { Sidebar, CheatSheet, Category } from './components/Sidebar';
 import { ArticleViewer } from './components/ArticleViewer';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Sparkles, Wand2, FileText, Zap, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Sparkles, Wand2, FileText, Zap, CheckCircle2, Search, Highlighter, Plus, Trash2, Layout, BookMarked, Settings, Menu, X, ChevronRight, Save, Loader2, AlertCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function App() {
-  const [cheatSheets, setCheatSheets] = useState<CheatSheet[]>([]);
-  const [folders, setFolders] = useState<Category[]>([]);
-  const [selectedSheetId, setSelectedSheetId] = useState<string | null>(null);
+  const [cheatSheets, setCheatSheets] = useState<CheatSheet[]>(() => {
+    const saved = localStorage.getItem('lexicon_sheets');
+    try {
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [folders, setFolders] = useState<Category[]>(() => {
+    const saved = localStorage.getItem('lexicon_folders');
+    try {
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedSheetId, setSelectedSheetId] = useState<string | null>(() => {
+    return localStorage.getItem('lexicon_selected_id');
+  });
+
   const [pastedText, setPastedText] = useState("");
   const [glossaryRevision, setGlossaryRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [showLexicon, setShowLexicon] = useState(false);
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('lexicon_sheets', JSON.stringify(cheatSheets));
+  }, [cheatSheets]);
+
+  useEffect(() => {
+    localStorage.setItem('lexicon_folders', JSON.stringify(folders));
+  }, [folders]);
+
+  useEffect(() => {
+    if (selectedSheetId) {
+      localStorage.setItem('lexicon_selected_id', selectedSheetId);
+    } else {
+      localStorage.removeItem('lexicon_selected_id');
+    }
+  }, [selectedSheetId]);
 
   const handleAddCheatSheet = (sheet: CheatSheet) => {
     setCheatSheets(prev => [...prev, sheet]);
@@ -87,6 +124,161 @@ export default function App() {
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
+  const handleHighlightText = (text: string) => {
+    if (!text) return;
+    const targetId = selectedSheetId;
+    if (!targetId) return;
+
+    const normalized = text.trim().replace(/\s+/g, ' ');
+
+    setCheatSheets(prev => prev.map(sheet => {
+      if (sheet.id === targetId) {
+        const currentHighlights = sheet.highlights || [];
+        const exists = currentHighlights.some(h => h.toLowerCase() === normalized.toLowerCase());
+        
+        if (exists) {
+          return { ...sheet, highlights: currentHighlights.filter(h => h.toLowerCase() !== normalized.toLowerCase()) };
+        } else {
+          return { ...sheet, highlights: [...currentHighlights, normalized] };
+        }
+      }
+      return sheet;
+    }));
+    setGlossaryRevision(prev => prev + 1);
+  };
+
+  const handleClearHighlights = () => {
+    const targetId = selectedSheetId;
+    if (!targetId) return;
+    setCheatSheets(prev => prev.map(sheet => {
+      if (sheet.id === targetId) return { ...sheet, highlights: [] };
+      return sheet;
+    }));
+    setGlossaryRevision(prev => prev + 1);
+  };
+
+  const [lexiconWidth, setLexiconWidth] = useState(320);
+  const [libraryWidth, setLibraryWidth] = useState(320);
+  const [lexiconSearchQuery, setLexiconSearchQuery] = useState("");
+
+  // Resize handler for Lexicon
+  const handleLexiconResize = (e: MouseEvent) => {
+    const newWidth = e.clientX - libraryWidth;
+    if (newWidth > 200 && newWidth < 600) {
+      setLexiconWidth(newWidth);
+    }
+  };
+
+  const startLexiconResizing = () => {
+    window.addEventListener('mousemove', handleLexiconResize);
+    window.addEventListener('mouseup', () => {
+      window.removeEventListener('mousemove', handleLexiconResize);
+    });
+  };
+
+  // Resize handler for Library
+  const handleLibraryResize = (e: MouseEvent) => {
+    const newWidth = e.clientX;
+    if (newWidth > 200 && newWidth < 500) {
+      setLibraryWidth(newWidth);
+    }
+  };
+
+  const startLibraryResizing = () => {
+    window.addEventListener('mousemove', handleLibraryResize);
+    window.addEventListener('mouseup', () => {
+      window.removeEventListener('mousemove', handleLibraryResize);
+    });
+  };
+
+  const SidebarGlossary = () => {
+    if (!selectedSheet) return null;
+    
+    // Get all terms defined for this specific sheet
+    const sheetTerms = selectedSheet.terms || {};
+    const termKeys = Object.keys(sheetTerms);
+    
+    const filteredTerms = termKeys.filter(term => {
+      const query = lexiconSearchQuery.toLowerCase();
+      const definition = sheetTerms[term].toLowerCase();
+      return term.toLowerCase().includes(query) || definition.includes(query);
+    }).sort();
+
+    if (termKeys.length === 0) {
+      return (
+        <div className="p-6 text-center">
+          <BookMarked className="size-8 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm italic">No translated terms yet.</p>
+          <p className="text-gray-400 text-xs mt-2">Use "AI Define" mode and save definitions to build your document vocabulary.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col h-full bg-gray-50/50">
+        <div className="p-4 border-b border-gray-100 sticky top-0 bg-white z-10 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+              <BookMarked className="size-4 text-indigo-600" />
+              DOCUMENT LEXICON ({termKeys.length})
+            </h3>
+          </div>
+          
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+            <input 
+              type="text"
+              placeholder="Search terms or definitions..."
+              value={lexiconSearchQuery}
+              onChange={(e) => setLexiconSearchQuery(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all font-medium"
+            />
+            {lexiconSearchQuery && (
+              <button 
+                onClick={() => setLexiconSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+          {filteredTerms.length > 0 ? (
+            filteredTerms.map((term, index) => {
+              const definition = sheetTerms[term];
+              
+              const lines = definition.split('\n').filter(l => l.trim());
+              const chinese = lines[0] || "";
+              const other = lines.slice(1).join('\n');
+              
+              return (
+                <div key={index} className="group p-5 rounded-2xl border border-gray-200 bg-white hover:shadow-xl hover:border-indigo-200 transition-all duration-300">
+                  <div className="flex items-start justify-between mb-3">
+                    <span className="font-bold text-gray-900 text-xl leading-tight">{term}</span>
+                    <span className="text-sm font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md uppercase tracking-tighter shrink-0 ml-2">{chinese}</span>
+                  </div>
+                  {other && (
+                    <div className="text-base text-gray-600 leading-relaxed glossary-content border-t border-gray-50 pt-4 mt-4">
+                      <ReactMarkdown>{other}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div className="py-12 text-center">
+              <Search className="size-8 text-gray-200 mx-auto mb-3" />
+              <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">No matches found</p>
+              <p className="text-gray-400 text-[10px] mt-1">Try a different search term</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const selectedSheet = useMemo(() => 
     cheatSheets.find(s => s.id === selectedSheetId), 
     [cheatSheets, selectedSheetId]
@@ -100,64 +292,68 @@ export default function App() {
       Object.assign(combined, sheet.terms);
     });
     return combined;
-  }, [cheatSheets]);
+  }, [cheatSheets, glossaryRevision]);
+
+  const currentHighlights = useMemo(() => {
+    if (!selectedSheetId) return [];
+    return selectedSheet?.highlights || [];
+  }, [selectedSheet, selectedSheetId]);
 
   return (
-    <div id="app-container" className="flex h-screen bg-gray-50 text-gray-900 font-sans">
-      <Sidebar 
-        cheatSheets={cheatSheets}
-        folders={folders}
-        selectedSheetId={selectedSheetId}
-        onSelectSheet={setSelectedSheetId}
-        onAddCheatSheet={handleAddCheatSheet}
-        onUpdateCheatSheet={handleUpdateCheatSheet}
-        onRemoveCheatSheet={handleRemoveCheatSheet}
-        onRenameSheet={handleRenameSheet}
-        onAddFolder={handleAddFolder}
-        onMoveSheet={handleMoveSheet}
-        onPasteText={setPastedText}
-      />
+    <div id="app-container" className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
+      <div style={{ width: `${libraryWidth}px` }} className="flex-shrink-0 relative h-full z-50">
+        <Sidebar 
+          cheatSheets={cheatSheets}
+          folders={folders}
+          selectedSheetId={selectedSheetId}
+          onSelectSheet={setSelectedSheetId}
+          onAddCheatSheet={handleAddCheatSheet}
+          onUpdateCheatSheet={handleUpdateCheatSheet}
+          onRemoveCheatSheet={handleRemoveCheatSheet}
+          onRenameSheet={handleRenameSheet}
+          onAddFolder={handleAddFolder}
+          onMoveSheet={handleMoveSheet}
+          onPasteText={setPastedText}
+        />
 
-      <main className="flex-1 overflow-y-auto p-12">
-        <div className="max-w-4xl mx-auto space-y-8">
-          <header className="space-y-4">
-            <div className="flex items-center gap-2 text-indigo-600 font-semibold tracking-wider uppercase text-xs">
-              <Zap className="size-4 fill-indigo-500" />
-              Intelligence Mode: On-Demand Definitions
-            </div>
-            <h2 className="text-4xl font-bold tracking-tight text-gray-900">
-              {selectedSheetId ? (
-                <>Reading: <span className="text-blue-600 truncate inline-block max-w-[400px] align-bottom">{selectedSheet?.name}</span></>
-              ) : (
-                <>New <span className="text-blue-600">Article Scan</span></>
-              )}
-            </h2>
-            <p className="text-lg text-gray-600 max-w-2xl leading-relaxed">
-              {selectedSheetId 
-                ? "Dive deep into your document. Highlight any confusing sentence to get an instant AI definition and save it to this document's specific lexicon."
-                : "Paste an article below. Any terminology matching your library will be highlighted automatically. Highlight text for on-the-fly definitions."}
-            </p>
-          </header>
+        {/* Lexicon Overlay */}
+        <AnimatePresence>
+          {selectedSheet && showLexicon && (
+            <motion.aside 
+              initial={{ x: -libraryWidth, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -libraryWidth, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="absolute inset-0 bg-white z-[70] flex flex-col shadow-2xl border-r border-gray-200"
+            >
+              <div className="flex-1 overflow-hidden relative">
+                <SidebarGlossary />
+                <button 
+                  onClick={() => setShowLexicon(false)}
+                  className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-all z-20"
+                  title="Back to Library"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
-          <section className="relative">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-sm font-medium">
-                  <BookOpen className="size-4" />
-                  {Object.keys(glossary).length} Total Definitions Available
-                </div>
-                {selectedSheetId && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 border border-green-100 text-green-700 text-sm font-medium">
-                    <FileText className="size-4" />
-                    {Object.keys(selectedSheet?.terms || {}).length} In this sheet
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Wand2 className="size-3" />
-                Context-aware highlights active
-              </div>
-            </div>
+        {/* Resize Handle for Library */}
+        <div 
+          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-indigo-400/30 transition-colors z-[80]"
+          onMouseDown={startLibraryResizing}
+        />
+      </div>
+
+      <main className="flex-1 overflow-hidden flex flex-row">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 lg:p-12">
+          <div className="space-y-8 h-full">
+
+
+          <section className="relative min-h-full">
+
 
             {!selectedSheetId && !pastedText && (
               <div className="mb-6">
@@ -173,11 +369,16 @@ export default function App() {
             <ArticleViewer 
               text={displayContent} 
               glossary={glossary} 
+              highlights={currentHighlights}
               onSaveTerm={handleSaveTerm}
+              onHighlight={handleHighlightText}
+              onClearHighlights={handleClearHighlights}
               canSave={!!selectedSheetId || cheatSheets.length > 0}
               revision={glossaryRevision}
               isProcessingContent={selectedSheet?.isProcessingContent}
               isProcessingTerms={selectedSheet?.isProcessingTerms}
+              showLexicon={showLexicon}
+              onToggleLexicon={() => setShowLexicon(!showLexicon)}
             />
 
             <AnimatePresence>
@@ -222,7 +423,8 @@ export default function App() {
             )}
           </AnimatePresence>
         </div>
-      </main>
-    </div>
-  );
+      </div>
+    </main>
+  </div>
+);
 }

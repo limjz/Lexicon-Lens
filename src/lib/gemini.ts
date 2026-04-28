@@ -80,16 +80,18 @@ export async function defineSelection(selection: string, context: string): Promi
   // PRIORITY TASK: Fast response for user-initiated definition
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `PRIORITY TASK: Define this term from the user's focus.
+    contents: `PRIORITY TASK: Define this term based on the provided context. 
+    Use the context to understand the specific nuance or technical meaning of the term in this document.
     
-    Context (first 1000 chars): ${context.substring(0, 1000)}...
-    Focus Term: ${selection}
+    Paragraph/Sentence Context: "${context.trim()}"
+    Focus Term: "${selection}"
     
     REQUIRED FORMAT:
-    Line 1: [Simplified Chinese Translation]
-    Line 2: [Ultra-concise English definition, max 12 words]
+    Line 1: [Simplified Chinese Translation - precise for this context]
+    Line 2: [**Expanded Full Form in Bold** - ONLY if the term is an acronym or abbreviation. If it is NOT an acronym, omit this line.]
+    Line 3: [Ultra-concise English definition, max 25 words, explaining the specific usage in this context]
     
-    Return ONLY these two lines. Speed is critical.`,
+    Return ONLY these lines. Be highly accurate. Remove any "Full Form:" prefixes.`,
   });
 
   return response.text?.trim() || "Could not generate definition.";
@@ -133,6 +135,40 @@ export async function extractFullContent(file: File): Promise<{ content: string;
   return {
     content: response.text || "",
     terms: {}, // Disabled automatic glossary to save AI capacity
+  };
+}
+
+export async function processUrl(url: string): Promise<{ content: string; name: string }> {
+  // 1. Fetch content from our backend API
+  const response = await fetch('/api/fetch-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to fetch URL");
+  }
+  
+  const data = await response.json();
+  const { title, content, html } = data;
+
+  // 2. Use Gemini to convert the messy HTML/Text into clean Markdown
+  const aiResponse = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Extract the main content from this webpage and convert it to clean, well-formatted Github Flavored Markdown.
+    Ignore navigation, sidebars, and footers. Focus on the primary article or documentation content.
+    
+    Web Page Title: ${title}
+    Web Page HTML Excerpt: ${html.substring(0, 50000)} // Chunk if too large
+    
+    Return ONLY the markdown content.`,
+  });
+
+  return {
+    content: aiResponse.text || content,
+    name: title || "Web Import"
   };
 }
 

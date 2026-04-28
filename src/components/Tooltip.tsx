@@ -5,9 +5,10 @@ interface TooltipProps {
   term: string;
   definition: string;
   children: React.ReactNode;
+  isHighlighted?: boolean;
 }
 
-export function Tooltip({ term, definition, children }: TooltipProps) {
+export function Tooltip({ term, definition, children, isHighlighted }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 
@@ -24,7 +25,11 @@ export function Tooltip({ term, definition, children }: TooltipProps) {
 
   return (
     <span 
-      className="relative cursor-help border-b-2 border-indigo-500 bg-indigo-100/50 text-indigo-700 px-0.5 rounded-sm hover:bg-indigo-200 transition-colors inline font-semibold"
+      className={`relative cursor-help border-b-2 border-indigo-500 transition-colors inline font-semibold ${
+        isHighlighted 
+          ? "bg-yellow-200 text-yellow-900 border-yellow-500 rounded-sm" 
+          : "bg-indigo-100/50 text-indigo-700 px-0.5 rounded-sm hover:bg-indigo-200"
+      }`}
       onMouseEnter={show}
       onMouseLeave={hide}
     >
