@@ -296,8 +296,8 @@ export function ArticleViewer({
         setSelectionMode('define');
       }
 
-      // Shift+H: Highlight Mode
-      if (e.shiftKey && e.key.toLowerCase() === 'h') {
+      // Shift+F: Highlight Mode
+      if (e.shiftKey && e.key.toLowerCase() === 'f') {
         setSelectionMode('highlight');
       }
 
@@ -685,7 +685,7 @@ export function ArticleViewer({
                     onClick={() => setSelectionMode('highlight')}
                     className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'highlight' ? 'shadow-lg ring-2 ring-gray-300' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     style={selectionMode === 'highlight' ? { backgroundColor: COLOR_DOT[highlightColor] } : {}}
-                    title="Quick Highlight Mode (Shift+H)"
+                    title="Quick Highlight Mode (Shift+F)"
                   >
                     <Highlighter className="size-5" style={selectionMode === 'highlight' ? { color: '#78350f' } : {}} />
                   </button>
@@ -814,23 +814,31 @@ export function ArticleViewer({
               </div>
               <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto custom-scrollbar">
                 <div className="space-y-3">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Selection Modes</div>
+                  <div className="grid gap-2">
+                    <ShortcutRow keys={['Shift', 'D']} label="AI Define Mode" />
+                    <ShortcutRow keys={['Shift', 'F']} label="Highlight Mode" />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Navigation & Tools</div>
                   <div className="grid gap-2">
                     <ShortcutRow keys={['Ctrl', 'F']} label="Find in text" />
                     <ShortcutRow keys={['Shift', 'L']} label="Toggle Lexicon" />
                     <ShortcutRow keys={['Shift', 'C']} label="Clear All Highlights" />
                     <ShortcutRow keys={['Shift', 'S']} label="Shortcuts Inventory" />
+                    <ShortcutRow keys={['Esc']} label="Close Panels / Deselect" />
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">View & Navigation</div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">View & Zoom</div>
                   <div className="grid gap-2">
                     <ShortcutRow keys={['Ctrl', '+']} label="Zoom In" />
                     <ShortcutRow keys={['Ctrl', '-']} label="Zoom Out" />
                     <ShortcutRow keys={['Ctrl', '0']} label="Reset Zoom (100%)" />
                     <ShortcutRow keys={['Ctrl', 'Wheel']} label="Zoom (Mouse)" />
-                    <ShortcutRow keys={['Esc']} label="Close Panels / Deselect" />
                   </div>
                 </div>
               </div>
