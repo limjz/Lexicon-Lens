@@ -5,7 +5,7 @@ import {
   Sparkles, Save, Loader2, X, Highlighter, Search, ChevronUp, ChevronDown,
   BookMarked, Trash2, ZoomIn, ZoomOut, Maximize2, Keyboard, Plus,
   Bold, Italic, Strikethrough, Code, List, ListOrdered, CheckSquare,
-  Quote, Code2, Minus,
+  Quote, Code2, Minus, Download, FileText, FileCode, FileDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -85,6 +85,7 @@ export function ArticleViewer({
   const [highlightColor, setHighlightColor]     = useState<HighlightColor>('yellow');
   const [zoom, setZoom]                         = useState(100);
   const [showShortcuts, setShowShortcuts]       = useState(false);
+  const [showExportMenu, setShowExportMenu]     = useState(false);
   const [isToolbarOpen, setIsToolbarOpen]       = useState(false);
   const [searchQuery, setSearchQuery]           = useState('');
   const [searchMatches, setSearchMatches]       = useState<number[]>([]);
@@ -300,18 +301,16 @@ export function ArticleViewer({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [appMode, isSearchOpen, onToggleLexicon, onClearHighlights, showShortcuts, selectionText, selectionMode]);
 
-  // ── Ctrl+Wheel zoom ────────────────────────────────────────────────────────
+  // ── Shift+Wheel zoom — attached to document so it works in both modes ──────
   useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
     const handleWheel = (e: WheelEvent) => {
       if (e.shiftKey) {
         e.preventDefault();
         setZoom(prev => Math.min(Math.max(e.deltaY < 0 ? prev + 5 : prev - 5, 50), 300));
       }
     };
-    viewer.addEventListener('wheel', handleWheel, { passive: false });
-    return () => viewer.removeEventListener('wheel', handleWheel);
+    document.addEventListener('wheel', handleWheel, { passive: false });
+    return () => document.removeEventListener('wheel', handleWheel);
   }, []);
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -615,6 +614,123 @@ export function ArticleViewer({
     }
   }, [applyFormat, onContentChange]);
 
+  // ── Export ────────────────────────────────────────────────────────────────
+  const handleExport = useCallback((format: 'md' | 'pdf' | 'html' | 'txt' | 'doc') => {
+    setShowExportMenu(false);
+    const rawContent = appMode === 'edit' ? editContentRef.current : text;
+    const filename   = (document.title || 'document').replace(/[^a-z0-9_\-]/gi, '_');
+
+    const download = (content: string, type: string, ext: string) => {
+      const blob = new Blob([content], { type });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${filename}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    const getHtmlBody = () => viewerRef.current?.innerHTML ?? `<pre style="white-space:pre-wrap">${rawContent.replace(/</g, '&lt;')}</pre>`;
+
+    switch (format) {
+      case 'md':
+        download(rawContent, 'text/markdown', 'md');
+        break;
+
+      case 'txt': {
+        const plain = rawContent
+          .replace(/#{1,6}\s+/g, '')
+          .replace(/\*\*(.*?)\*\*/g, '$1')
+          .replace(/\*(.*?)\*/g, '$1')
+          .replace(/~~(.*?)~~/g, '$1')
+          .replace(/`{3}[\s\S]*?`{3}/g, '')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+          .replace(/^[-*+]\s/gm, '• ')
+          .replace(/^\d+\.\s/gm, '')
+          .replace(/^>\s/gm, '')
+          .replace(/^---$/gm, '─────────────')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        download(plain, 'text/plain', 'txt');
+        break;
+      }
+
+      case 'html': {
+        const body = getHtmlBody();
+        download(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>${filename}</title>
+<style>
+  body{font-family:Georgia,serif;max-width:820px;margin:2rem auto;padding:0 2rem;line-height:1.8;color:#1a1a1a}
+  h1{font-size:2rem;border-bottom:2px solid #e5e7eb;padding-bottom:.4rem;margin:2rem 0 1rem}
+  h2{font-size:1.5rem;margin:1.5rem 0 .75rem}
+  h3{font-size:1.2rem;margin:1.2rem 0 .5rem}
+  p{margin-bottom:1.2rem}
+  blockquote{border-left:4px solid #6366f1;margin:1.5rem 0;padding:.4rem 1.5rem;color:#6b7280;font-style:italic}
+  code{background:#f3f4f6;padding:.1em .3em;border-radius:3px;font-family:monospace;font-size:.9em}
+  pre{background:#f3f4f6;padding:1rem;border-radius:6px;overflow-x:auto}
+  mark{background:#fef08a;padding:.1em}
+  a{color:#4f46e5}
+  hr{border:none;border-top:1px solid #e5e7eb;margin:2rem 0}
+  ul,ol{padding-left:1.5rem;margin-bottom:1.2rem}
+  li{margin-bottom:.35rem}
+  table{border-collapse:collapse;width:100%;margin:1rem 0}
+  th,td{border:1px solid #e5e7eb;padding:.45rem .7rem;text-align:left}
+  th{background:#f9fafb;font-weight:700}
+</style></head><body>${body}</body></html>`, 'text/html', 'html');
+        break;
+      }
+
+      case 'doc': {
+        const body = getHtmlBody();
+        download(`<html xmlns:o='urn:schemas-microsoft-com:office:office'
+  xmlns:w='urn:schemas-microsoft-com:office:word'
+  xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset='UTF-8'><title>${filename}</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->
+<style>body{font-family:Calibri,sans-serif;font-size:11pt;line-height:1.6}
+h1{font-size:18pt}h2{font-size:14pt}h3{font-size:12pt}
+</style></head>
+<body>${body}</body></html>`, 'application/msword', 'doc');
+        break;
+      }
+
+      case 'pdf': {
+        const body = getHtmlBody();
+        const win  = window.open('', '_blank', 'width=850,height=1000');
+        if (!win) return;
+        win.document.write(`<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><title>${filename}</title>
+<style>
+  @page{margin:2cm}
+  body{font-family:Georgia,serif;font-size:12pt;line-height:1.7;color:#000;max-width:100%}
+  h1{font-size:22pt;border-bottom:1px solid #ccc;padding-bottom:.3rem;margin:1.5rem 0 .75rem}
+  h2{font-size:16pt;margin:1.25rem 0 .5rem}
+  h3{font-size:13pt;margin:1rem 0 .4rem}
+  p{margin-bottom:1rem}
+  blockquote{border-left:3px solid #999;margin:1rem 0;padding:.25rem 1rem;color:#555;font-style:italic}
+  code{background:#f5f5f5;padding:.1em .25em;font-family:'Courier New',monospace;font-size:10pt}
+  pre{background:#f5f5f5;padding:.75rem;overflow-x:auto;font-size:10pt}
+  mark{background:#fff3a3}
+  ul,ol{padding-left:1.25rem;margin-bottom:1rem}li{margin-bottom:.3rem}
+  table{border-collapse:collapse;width:100%;font-size:10pt}
+  th,td{border:1px solid #ccc;padding:.4rem .6rem}th{background:#f0f0f0;font-weight:700}
+  hr{border:none;border-top:1px solid #ccc;margin:1.5rem 0}
+  a{color:#1a0dab}
+  @media print{button{display:none}}
+</style></head><body>
+${body}
+<script>window.onload=function(){window.print()}<\/script>
+</body></html>`);
+        win.document.close();
+        break;
+      }
+    }
+  }, [appMode, text]);
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div
@@ -703,21 +819,47 @@ export function ArticleViewer({
 
               <TDiv />
 
-              {/* Font size */}
-              <div className="flex items-center gap-1 ml-auto">
-                <button
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => setEditorFontSize(s => Math.max(s - 1, 10))}
-                  className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-200 transition-all"
-                  title="Decrease font size"
-                >A−</button>
-                <span className="text-[11px] font-mono text-gray-400 min-w-[26px] text-center">{editorFontSize}</span>
-                <button
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => setEditorFontSize(s => Math.min(s + 1, 32))}
-                  className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-200 transition-all"
-                  title="Increase font size"
-                >A+</button>
+              {/* Font size + zoom + export */}
+              <div className="flex items-center gap-2 ml-auto">
+                {/* Font size */}
+                <div className="flex items-center gap-1">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setEditorFontSize(s => Math.max(s - 1, 10))}
+                    className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-200 transition-all" title="Decrease font size">A−</button>
+                  <span className="text-[11px] font-mono text-gray-400 min-w-[26px] text-center">{editorFontSize}</span>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setEditorFontSize(s => Math.min(s + 1, 32))}
+                    className="w-6 h-6 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-200 transition-all" title="Increase font size">A+</button>
+                </div>
+
+                <div className="w-px h-4 bg-gray-200" />
+
+                {/* Zoom indicator */}
+                <div className="flex items-center gap-1">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setZoom(p => Math.max(p - 10, 50))}
+                    className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-200 transition-all" title="Zoom Out (Shift+-)">
+                    <ZoomOut className="size-3.5" />
+                  </button>
+                  <span className="text-[11px] font-mono text-gray-400 min-w-[30px] text-center">{zoom}%</span>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setZoom(p => Math.min(p + 10, 200))}
+                    className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-200 transition-all" title="Zoom In (Shift++)">
+                    <ZoomIn className="size-3.5" />
+                  </button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setZoom(100)}
+                    className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-200 transition-all" title="Reset Zoom (Shift+0)">
+                    <Maximize2 className="size-3.5" />
+                  </button>
+                </div>
+
+                <div className="w-px h-4 bg-gray-200" />
+
+                {/* Export */}
+                <div className="relative">
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setShowExportMenu(v => !v)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-200 transition-all"
+                    title="Export document">
+                    <Download className="size-3.5" />
+                    Export
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -742,7 +884,7 @@ export function ArticleViewer({
             onKeyDown={handleEditorKeyDown}
             placeholder="Start writing or paste content here…&#10;&#10;Tip: Select text and use the toolbar above to format it.&#10;Keyboard shortcuts: Ctrl+B (bold), Ctrl+I (italic), Tab (indent), Enter (continue list)"
             spellCheck
-            style={{ fontSize: `${editorFontSize}px`, lineHeight: '1.8' }}
+            style={{ fontSize: `${editorFontSize}px`, lineHeight: '1.8', zoom: `${zoom}%` }}
             className="w-full max-w-4xl rounded-2xl bg-white px-10 py-10 shadow-sm border border-gray-100 min-h-[600px] text-gray-800 font-sans resize-none outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 transition-all"
           />
         </div>
@@ -873,6 +1015,11 @@ export function ArticleViewer({
                       title="Shortcuts Help">
                       <Keyboard className="size-5" />
                     </button>
+                    <button onClick={() => setShowExportMenu(v => !v)}
+                      className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${showExportMenu ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                      title="Export Document">
+                      <Download className="size-5" />
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -880,6 +1027,59 @@ export function ArticleViewer({
           </div>
         </aside>
       )}
+
+      {/* ── Export modal ── */}
+      <AnimatePresence>
+        {showExportMenu && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+              onClick={() => setShowExportMenu(false)}
+            />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }}
+              className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-indigo-600 text-white rounded-lg"><Download className="size-3.5" /></div>
+                  <h3 className="font-bold text-gray-900 text-sm">Export Document</h3>
+                </div>
+                <button onClick={() => setShowExportMenu(false)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all"><X className="size-4" /></button>
+              </div>
+
+              <div className="p-4 space-y-2">
+                <p className="text-xs text-gray-400 mb-3 px-1">Choose a format to download or print your document.</p>
+
+                {[
+                  { fmt: 'md'  as const, icon: <FileText className="size-4 text-gray-500" />,    label: 'Markdown',    sub: '.md — raw markdown source',           badge: 'text' },
+                  { fmt: 'txt' as const, icon: <FileText className="size-4 text-gray-400" />,    label: 'Plain Text',  sub: '.txt — no formatting syntax',         badge: 'text' },
+                  { fmt: 'html'as const, icon: <FileCode className="size-4 text-blue-500" />,    label: 'HTML',        sub: '.html — styled web page',             badge: 'web'  },
+                  { fmt: 'doc' as const, icon: <FileDown className="size-4 text-indigo-500" />,  label: 'Word (.doc)', sub: '.doc — open in Microsoft Word',       badge: 'word' },
+                  { fmt: 'pdf' as const, icon: <FileDown className="size-4 text-red-500" />,     label: 'PDF (Print)', sub: 'Opens print dialog → Save as PDF',    badge: 'pdf'  },
+                ].map(({ fmt, icon, label, sub, badge }) => (
+                  <button key={fmt} onClick={() => handleExport(fmt)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all group text-left"
+                  >
+                    <div className="size-9 rounded-lg bg-gray-100 group-hover:bg-white flex items-center justify-center shrink-0 transition-all border border-transparent group-hover:border-gray-200">
+                      {icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-gray-800">{label}</div>
+                      <div className="text-xs text-gray-400 truncate">{sub}</div>
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide shrink-0 ${
+                      badge === 'pdf'  ? 'bg-red-50 text-red-500' :
+                      badge === 'word' ? 'bg-indigo-50 text-indigo-500' :
+                      badge === 'web'  ? 'bg-blue-50 text-blue-500' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>{badge}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ── Shortcuts panel ── */}
       <AnimatePresence>
