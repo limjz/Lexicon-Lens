@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Sidebar, CheatSheet, Category } from './components/Sidebar';
 import { ArticleViewer } from './components/ArticleViewer';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Sparkles, Wand2, FileText, Zap, CheckCircle2, Search, Highlighter, Plus, Trash2, Layout, BookMarked, Settings, Menu, X, ChevronRight, Save, Loader2, AlertCircle } from 'lucide-react';
+import { BookOpen, Sparkles, Wand2, FileText, Zap, CheckCircle2, Search, Highlighter, Plus, Trash2, Layout, BookMarked, Settings, Menu, X, ChevronRight, Save, Loader2, AlertCircle, PenLine } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -31,6 +31,7 @@ export default function App() {
   const [glossaryRevision, setGlossaryRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showLexicon, setShowLexicon] = useState(false);
+  const [appMode, setAppMode] = useState<'reading' | 'edit'>('reading');
 
   // Persistence Effects
   useEffect(() => {
@@ -122,6 +123,14 @@ export default function App() {
     setGlossaryRevision(prev => prev + 1);
     setSaveStatus(`Saved: "${normalizedTerm}"`);
     setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  const handleContentChange = (newContent: string) => {
+    if (selectedSheetId) {
+      handleUpdateCheatSheet(selectedSheetId, { content: newContent });
+    } else {
+      setPastedText(newContent);
+    }
   };
 
   const [lexiconWidth, setLexiconWidth] = useState(320);
@@ -307,6 +316,32 @@ export default function App() {
 
   return (
     <div id="app-container" className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
+
+      {/* ── Mode switcher – fixed top-right ── */}
+      <div className="fixed top-4 right-4 z-[90] flex items-center gap-0.5 bg-white/95 backdrop-blur-md border border-gray-200 rounded-full p-1 shadow-lg">
+        <button
+          onClick={() => setAppMode('reading')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+            appMode === 'reading'
+              ? 'bg-gray-900 text-white shadow'
+              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+          }`}
+        >
+          <BookOpen className="size-3.5" />
+          Reading
+        </button>
+        <button
+          onClick={() => setAppMode('edit')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+            appMode === 'edit'
+              ? 'bg-indigo-600 text-white shadow'
+              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+          }`}
+        >
+          <PenLine className="size-3.5" />
+          Editing
+        </button>
+      </div>
       <div style={{ width: `${libraryWidth}px` }} className="flex-shrink-0 relative h-full z-50">
         <Sidebar 
           cheatSheets={cheatSheets}
@@ -372,9 +407,9 @@ export default function App() {
               </div>
             )}
 
-            <ArticleViewer 
-              text={displayContent} 
-              glossary={glossary} 
+            <ArticleViewer
+              text={displayContent}
+              glossary={glossary}
               highlights={currentHighlights}
               onSaveTerm={handleSaveTerm}
               onHighlight={handleHighlightText}
@@ -385,6 +420,9 @@ export default function App() {
               isProcessingTerms={selectedSheet?.isProcessingTerms}
               showLexicon={showLexicon}
               onToggleLexicon={() => setShowLexicon(!showLexicon)}
+              appMode={appMode}
+              onContentChange={handleContentChange}
+              documentId={selectedSheetId || 'pastedText'}
             />
 
             <AnimatePresence>
