@@ -13,7 +13,7 @@ export interface CheatSheet {
   name: string;
   content: string;
   terms: Record<string, string>;
-  highlights?: { text: string; index: number }[];
+  highlights?: { text: string; index: number; color?: string }[];
   folderId?: string;
   isProcessing?: boolean;
   isProcessingContent?: boolean;

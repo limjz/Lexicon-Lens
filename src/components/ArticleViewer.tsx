@@ -6,12 +6,35 @@ import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+// Light pastel colour palette for highlights
+const HIGHLIGHT_COLORS = ['yellow', 'pink', 'blue', 'green', 'orange', 'red'] as const;
+type HighlightColor = typeof HIGHLIGHT_COLORS[number];
+
+const COLOR_DOT: Record<HighlightColor, string> = {
+  yellow: '#fef08a',
+  pink:   '#fbcfe8',
+  blue:   '#bfdbfe',
+  green:  '#bbf7d0',
+  orange: '#fed7aa',
+  red:    '#fecaca',
+};
+
+// Complete Tailwind class strings (must be static so Tailwind includes them in the build)
+const COLOR_CLASSES: Record<HighlightColor, string> = {
+  yellow: 'bg-yellow-200 text-yellow-900 ring-yellow-400 shadow-[0_0_8px_rgba(253,224,71,0.4)]',
+  pink:   'bg-pink-200   text-pink-900   ring-pink-400   shadow-[0_0_8px_rgba(244,114,182,0.3)]',
+  blue:   'bg-blue-200   text-blue-900   ring-blue-400   shadow-[0_0_8px_rgba(96,165,250,0.3)]',
+  green:  'bg-green-200  text-green-900  ring-green-400  shadow-[0_0_8px_rgba(74,222,128,0.3)]',
+  orange: 'bg-orange-200 text-orange-900 ring-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.3)]',
+  red:    'bg-red-200    text-red-900    ring-red-400    shadow-[0_0_8px_rgba(248,113,113,0.3)]',
+};
+
 interface ArticleViewerProps {
   text: string;
   glossary: Record<string, string>;
-  highlights?: { text: string; index: number }[];
+  highlights?: { text: string; index: number; color?: string }[];
   onSaveTerm?: (term: string, definition: string) => void;
-  onHighlight?: (highlight: { text: string; index: number }) => void;
+  onHighlight?: (highlight: { text: string; index: number; color?: string }) => void;
   onClearHighlights?: () => void;
   canSave?: boolean;
   revision?: number;
@@ -41,7 +64,15 @@ export function ArticleViewer({
   const [aiDefinition, setAiDefinition] = useState<string | null>(null);
   const [isDefining, setIsDefining] = useState(false);
   const [selectionMode, setSelectionMode] = useState<'define' | 'highlight'>('define');
+  const [highlightColor, setHighlightColor] = useState<HighlightColor>('yellow');
   const [zoom, setZoom] = useState(100);
+
+  // Refs so highlightText's useCallback closure can always read the latest values
+  // without needing them as deps (avoids expensive ReactMarkdown remounts on mode/callback change)
+  const selectionModeRef = useRef(selectionMode);
+  selectionModeRef.current = selectionMode;
+  const onHighlightRef = useRef(onHighlight);
+  onHighlightRef.current = onHighlight;
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [isToolbarOpen, setIsToolbarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -160,7 +191,7 @@ export function ArticleViewer({
       
       if (selectionMode === 'highlight') {
         if (onHighlight) {
-            onHighlight({ text: selected.trim().replace(/\s+/g, ' '), index });
+          onHighlight({ text: selected.trim().replace(/\s+/g, ' '), index, color: highlightColor });
         }
         setTimeout(() => window.getSelection()?.removeAllRanges(), 200);
         return;
@@ -439,8 +470,8 @@ export function ArticleViewer({
           );
         } else if (isSearchMatch) {
           result.push(
-            <mark 
-              key={`search-${i}-${currentOccurrenceIndex}`} 
+            <mark
+              key={`search-${i}-${currentOccurrenceIndex}`}
               data-search-match="true"
               className="bg-green-300 text-green-900 px-0.5 rounded-sm font-medium ring-2 ring-green-500"
             >
@@ -448,14 +479,18 @@ export function ArticleViewer({
             </mark>
           );
         } else if (highlightMatch) {
+          const colorKey = (highlightMatch.color || 'yellow') as HighlightColor;
+          const colorCls = COLOR_CLASSES[colorKey] ?? COLOR_CLASSES.yellow;
           result.push(
-            <mark 
-              key={`mark-${i}-${currentOccurrenceIndex}`} 
+            <mark
+              key={`mark-${i}-${currentOccurrenceIndex}`}
               onClick={(e) => {
+                // Only remove the highlight when the highlighter tool is active
+                if (selectionModeRef.current !== 'highlight') return;
                 e.stopPropagation();
-                onHighlight?.({ text: part, index: currentOccurrenceIndex });
+                onHighlightRef.current?.({ text: part, index: currentOccurrenceIndex, color: highlightMatch.color });
               }}
-              className="bg-yellow-300 text-yellow-950 px-0.5 rounded-sm font-bold shadow-[0_0_10px_rgba(253,224,71,0.5)] ring-1 ring-yellow-500 cursor-pointer hover:bg-yellow-400 transition-colors"
+              className={`${colorCls} px-0.5 rounded-sm font-bold ring-1 transition-opacity`}
             >
               {part}
             </mark>
@@ -590,7 +625,7 @@ export function ArticleViewer({
           style={{ zoom: `${zoom}%` }}
           className={`prose prose-blue prose-sm md:prose-base w-full max-w-4xl rounded-2xl bg-white p-8 md:p-12 shadow-sm border border-gray-100 min-h-[600px] leading-relaxed text-gray-800 transition-all ${
             isProcessingContent ? 'opacity-90 select-none cursor-wait' : ''
-          }`}
+          } ${selectionMode === 'highlight' ? '[&_mark]:cursor-pointer [&_mark]:hover:opacity-75' : '[&_mark]:cursor-text'}`}
         >
           {isProcessingContent ? (
             <div className="flex flex-col items-center justify-center py-24 space-y-4">
@@ -639,21 +674,41 @@ export function ArticleViewer({
               >
                 {/* 1. AI Tools & Highlights (Base set) */}
                 <div className="flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-1.5 shadow-xl">
-                  <button 
+                  <button
                     onClick={() => setSelectionMode('define')}
                     className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'define' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     title="AI Define Mode (Shift+D)"
                   >
                     <Sparkles className="size-5" />
                   </button>
-                  <button 
+                  <button
                     onClick={() => setSelectionMode('highlight')}
-                    className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'highlight' ? 'bg-yellow-400 text-yellow-950 shadow-lg' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    className={`p-2.5 rounded-lg transition-all flex items-center justify-center ${selectionMode === 'highlight' ? 'shadow-lg ring-2 ring-gray-300' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    style={selectionMode === 'highlight' ? { backgroundColor: COLOR_DOT[highlightColor] } : {}}
                     title="Quick Highlight Mode (Shift+H)"
                   >
-                    <Highlighter className="size-5" />
+                    <Highlighter className="size-5" style={selectionMode === 'highlight' ? { color: '#78350f' } : {}} />
                   </button>
                 </div>
+
+                {/* Colour picker — only visible when highlight mode is active */}
+                {selectionMode === 'highlight' && (
+                  <div className="flex flex-col gap-1.5 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-2 shadow-xl items-center">
+                    {HIGHLIGHT_COLORS.map(color => (
+                      <button
+                        key={color}
+                        onClick={() => setHighlightColor(color)}
+                        title={color.charAt(0).toUpperCase() + color.slice(1)}
+                        className={`size-6 rounded-full transition-all ${
+                          highlightColor === color
+                            ? 'ring-2 ring-offset-1 ring-gray-700 scale-110'
+                            : 'hover:scale-110 ring-1 ring-gray-200'
+                        }`}
+                        style={{ backgroundColor: COLOR_DOT[color] }}
+                      />
+                    ))}
+                  </div>
+                )}
 
                 {/* 2. Search & Lexicon */}
                 <div className="flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-1.5 shadow-xl">
@@ -848,7 +903,7 @@ export function ArticleViewer({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       if (onHighlight && selectionText) {
-                        onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex });
+                        onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex, color: highlightColor });
                       }
                       setSelectionText(null);
                       setAiDefinition(null);
@@ -894,7 +949,7 @@ export function ArticleViewer({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     if (onHighlight && selectionText) {
-                      onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex });
+                      onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex, color: highlightColor });
                     }
                     setSelectionText(null);
                     setAiDefinition(null);

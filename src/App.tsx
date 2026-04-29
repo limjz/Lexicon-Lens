@@ -266,7 +266,7 @@ export default function App() {
     return selectedSheet?.highlights || [];
   }, [selectedSheet, selectedSheetId]);
 
-  const handleHighlightText = (highlight: { text: string; index: number }) => {
+  const handleHighlightText = (highlight: { text: string; index: number; color?: string }) => {
     if (!highlight.text) return;
     const targetId = selectedSheetId;
     if (!targetId) return;
@@ -275,18 +275,18 @@ export default function App() {
 
     setCheatSheets(prev => prev.map(sheet => {
       if (sheet.id === targetId) {
-        const currentHighlights = (sheet.highlights || []).filter(h => 
+        const currentHighlights = (sheet.highlights || []).filter(h =>
           h && typeof h === 'object' && typeof h.text === 'string'
-        ) as { text: string; index: number }[];
-        
-        const existingIndex = currentHighlights.findIndex(h => 
-          h.text.toLowerCase() === normalizedText.toLowerCase() && 
+        ) as { text: string; index: number; color?: string }[];
+
+        const existingIndex = currentHighlights.findIndex(h =>
+          h.text.toLowerCase() === normalizedText.toLowerCase() &&
           h.index === highlight.index
         );
-        
+
         const newHighlights = existingIndex !== -1
           ? currentHighlights.filter((_, i) => i !== existingIndex)
-          : [...currentHighlights, { text: normalizedText, index: highlight.index }];
+          : [...currentHighlights, { text: normalizedText, index: highlight.index, color: highlight.color || 'yellow' }];
 
         return { ...sheet, highlights: newHighlights };
       }
