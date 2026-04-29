@@ -24,10 +24,11 @@ export function Tooltip({ term, definition, children, isHighlighted }: TooltipPr
   };
 
   return (
-    <span 
+    <span
+      data-glossary-term="true"
       className={`relative cursor-help border-b-2 border-indigo-500 transition-colors inline font-semibold ${
-        isHighlighted 
-          ? "bg-yellow-300 text-yellow-950 border-yellow-500 rounded-sm font-bold shadow-[0_0_8px_rgba(253,224,71,0.4)]" 
+        isHighlighted
+          ? "bg-yellow-300 text-yellow-950 border-yellow-500 rounded-sm font-bold shadow-[0_0_8px_rgba(253,224,71,0.4)]"
           : "bg-indigo-100/50 text-indigo-700 px-0.5 rounded-sm hover:bg-indigo-200"
       }`}
       onMouseEnter={show}

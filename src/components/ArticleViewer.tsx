@@ -81,48 +81,62 @@ export function ArticleViewer({
       const range = sel.getRangeAt(0);
       const startNode = range.startContainer;
       const startOffset = range.startOffset;
-      
+
       const normalizedTarget = targetText.trim().replace(/\s+/g, ' ').toLowerCase();
       if (!normalizedTarget) return 0;
 
+      const escaped = normalizedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const targetRegex = new RegExp(escaped, 'g');
+
       let occurrenceCount = 0;
       const walker = document.createTreeWalker(viewer, NodeFilter.SHOW_TEXT);
-      
+
       while (walker.nextNode()) {
         const node = walker.currentNode;
-        
-        // Skip UI elements like definitions or hidden text
+
+        // Skip UI elements like tooltip popups or hidden text
         const parent = node.parentElement;
         if (parent && (
-          parent.closest('.tooltip-content') || 
-          parent.closest('.hidden') || 
+          parent.closest('.tooltip-content') ||
+          parent.closest('.hidden') ||
           parent.closest('.ai-assistant-panel') ||
           parent.getAttribute('aria-hidden') === 'true'
         )) {
           continue;
         }
 
+        // Skip text nodes that live INSIDE a glossary-term Tooltip wrapper.
+        // highlightText uses a longest-match-first regex, so a word that appears
+        // as part of a longer glossary term (e.g. "fox" inside "quick brown fox")
+        // is never counted as a standalone occurrence there. Counting it here would
+        // inflate the index and prevent the yellow <mark> from ever rendering.
+        const isInsideGlossaryTerm = !!parent?.closest('[data-glossary-term]');
+
         const text = node.textContent || "";
-        const normalizedText = text.replace(/\s+/g, ' ').toLowerCase();
 
         if (node === startNode) {
-          const partBefore = text.substring(0, startOffset);
-          const normalizedPartBefore = partBefore.replace(/\s+/g, ' ').toLowerCase();
-          
-          const escaped = normalizedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(escaped, 'g');
-          const matchesBefore = normalizedPartBefore.match(regex);
-          if (matchesBefore) {
-            occurrenceCount += matchesBefore.length;
+          // If the selection itself starts inside a glossary term, stop here
+          // without adding to the count (it won't be a standalone highlight anyway).
+          if (!isInsideGlossaryTerm) {
+            const partBefore = text.substring(0, startOffset);
+            const normalizedPartBefore = partBefore.replace(/\s+/g, ' ').toLowerCase();
+            targetRegex.lastIndex = 0;
+            const matchesBefore = normalizedPartBefore.match(targetRegex);
+            if (matchesBefore) {
+              occurrenceCount += matchesBefore.length;
+            }
           }
           break;
         }
 
-        const escaped = normalizedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(escaped, 'g');
-        const matches = normalizedText.match(regex);
-        if (matches) {
-          occurrenceCount += matches.length;
+        // Only count standalone occurrences (outside glossary term wrappers)
+        if (!isInsideGlossaryTerm) {
+          const normalizedText = text.replace(/\s+/g, ' ').toLowerCase();
+          targetRegex.lastIndex = 0;
+          const matches = normalizedText.match(targetRegex);
+          if (matches) {
+            occurrenceCount += matches.length;
+          }
         }
       }
 
