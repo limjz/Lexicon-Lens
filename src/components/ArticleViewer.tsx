@@ -928,7 +928,7 @@ export function ArticleViewer({
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                <button 
+                <button
                   onClick={handleAiDefine}
                   disabled={isDefining}
                   className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-black transition-all disabled:opacity-50 shadow-lg active:scale-[0.98]"
@@ -944,21 +944,6 @@ export function ArticleViewer({
                       <span>DEFINE WITH AI</span>
                     </>
                   )}
-                </button>
-                <button 
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (onHighlight && selectionText) {
-                      onHighlight({ text: selectionText.trim().replace(/\s+/g, ' '), index: selectionIndex, color: highlightColor });
-                    }
-                    setSelectionText(null);
-                    setAiDefinition(null);
-                    window.getSelection()?.removeAllRanges();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-yellow-400 text-yellow-950 border border-yellow-500 rounded-xl text-sm font-bold hover:bg-yellow-500 shadow-lg transition-all active:scale-[0.98]"
-                >
-                  <Highlighter className="size-4" />
-                  <span>APPLY HIGHLIGHT</span>
                 </button>
               </div>
             )}
