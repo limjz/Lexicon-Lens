@@ -258,7 +258,21 @@ export function ArticleViewer({
   // ── Keyboard shortcuts (reading mode) ─────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // In edit mode only allow Ctrl+F
+      // Zoom shortcuts — active in BOTH modes (Shift+scroll / Shift++ / Shift+- / Shift+0)
+      if (e.shiftKey && (e.key === '+' || e.code === 'Equal')) {
+        e.preventDefault();
+        setZoom(prev => Math.min(prev + 10, 200));
+      }
+      if (e.shiftKey && (e.key === '-' || e.code === 'Minus')) {
+        e.preventDefault();
+        setZoom(prev => Math.max(prev - 10, 50));
+      }
+      if (e.shiftKey && (e.key === '0' || e.code === 'Digit0')) {
+        e.preventDefault();
+        setZoom(100);
+      }
+
+      // In edit mode only allow Ctrl+F (beyond zoom above)
       if (appMode === 'edit') {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
           e.preventDefault();
@@ -270,18 +284,6 @@ export function ArticleViewer({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setIsSearchOpen(prev => !prev);
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        setZoom(prev => Math.min(prev + 10, 200));
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-        e.preventDefault();
-        setZoom(prev => Math.max(prev - 10, 50));
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-        e.preventDefault();
-        setZoom(100);
       }
       if (e.shiftKey && e.key.toLowerCase() === 'd') setSelectionMode('define');
       if (e.shiftKey && e.key.toLowerCase() === 'f') setSelectionMode('highlight');
@@ -303,7 +305,7 @@ export function ArticleViewer({
     const viewer = viewerRef.current;
     if (!viewer) return;
     const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
+      if (e.shiftKey) {
         e.preventDefault();
         setZoom(prev => Math.min(Math.max(e.deltaY < 0 ? prev + 5 : prev - 5, 50), 300));
       }
@@ -853,10 +855,10 @@ export function ArticleViewer({
 
                   {/* Zoom */}
                   <div className="flex flex-col gap-1 bg-white/90 backdrop-blur-md border border-gray-100 rounded-xl p-1.5 shadow-xl">
-                    <button onClick={() => setZoom(prev => Math.min(prev + 10, 200))} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Zoom In"><ZoomIn className="size-5" /></button>
+                    <button onClick={() => setZoom(prev => Math.min(prev + 10, 200))} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Zoom In (Shift++)"><ZoomIn className="size-5" /></button>
                     <div className="text-[10px] font-bold text-gray-400 text-center">{zoom}%</div>
-                    <button onClick={() => setZoom(prev => Math.max(prev - 10, 50))} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Zoom Out"><ZoomOut className="size-5" /></button>
-                    <button onClick={() => setZoom(100)} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Reset Zoom"><Maximize2 className="size-5" /></button>
+                    <button onClick={() => setZoom(prev => Math.max(prev - 10, 50))} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Zoom Out (Shift+-)"><ZoomOut className="size-5" /></button>
+                    <button onClick={() => setZoom(100)} className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center" title="Reset Zoom (Shift+0)"><Maximize2 className="size-5" /></button>
                   </div>
 
                   {/* Misc */}
@@ -925,12 +927,12 @@ export function ArticleViewer({
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">View & Zoom (Reading)</div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">View & Zoom (Both Modes)</div>
                   <div className="grid gap-2">
-                    <ShortcutRow keys={['Ctrl', '+']} label="Zoom In" />
-                    <ShortcutRow keys={['Ctrl', '-']} label="Zoom Out" />
-                    <ShortcutRow keys={['Ctrl', '0']} label="Reset Zoom (100%)" />
-                    <ShortcutRow keys={['Ctrl', 'Wheel']} label="Zoom (Mouse)" />
+                    <ShortcutRow keys={['Shift', '+']} label="Zoom In" />
+                    <ShortcutRow keys={['Shift', '-']} label="Zoom Out" />
+                    <ShortcutRow keys={['Shift', '0']} label="Reset Zoom (100%)" />
+                    <ShortcutRow keys={['Shift', 'Scroll']} label="Zoom (Mouse)" />
                   </div>
                 </div>
               </div>
